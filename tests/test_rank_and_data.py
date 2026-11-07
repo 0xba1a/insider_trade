@@ -104,12 +104,71 @@ def test_unlisted_and_zero_price_rows_ignored(conn):
 def test_market_cap_normalization(conn):
     add(conn, 9, "MKT", ceo(91), [("2026-10-10", 1000, 10, 2000)])
     conn.execute(
-        "INSERT INTO market_data VALUES (9, 'MKT', 1000000, '2026-09-30', 'x', 12.5, '2026-11-06', 'yahoo')"
+        """INSERT INTO market_data (cik, ticker, shares_outstanding, shares_asof, price, price_source, price_ratio)
+           VALUES (9, 'MKT', 1000000, '2026-09-30', 12.5, 'yahoo', 1.0)"""
     )
     r = rank(conn, RankParams(as_of=AS_OF)).iloc[0]
     assert r.market_cap == pytest.approx(12_500_000)
     assert r.pct_mcap == pytest.approx(10_000 / 12_500_000)
     assert r.price_chg == pytest.approx(0.25)
+    assert not r.price_mismatch
+
+
+def test_price_mismatch_hides_market_figures(conn):
+    add(conn, 11, "ADR", ceo(111), [("2026-10-10", 1000, 17.4, 2000)])
+    add(conn, 12, "STL", ceo(121), [("2026-10-10", 1000, 10, 2000)])
+    conn.executemany(
+        """INSERT INTO market_data (cik, ticker, shares_outstanding, price, price_source, price_ratio)
+           VALUES (?,?,?,?,'yahoo',?)""",
+        [(11, "ADR", 1e9, 2.54, 6.85), (12, "STL", 100, 12.0, 1.0)],
+    )
+    df = rank(conn, RankParams(as_of=AS_OF)).set_index("ticker")
+    assert df.loc["ADR"].price_mismatch
+    assert math.isnan(df.loc["ADR"].pct_mcap) and math.isnan(df.loc["ADR"].price_chg)
+    assert math.isnan(df.loc["STL"].pct_mcap)  # 10K bought vs 1.2K market cap: stale share count
+
+
+def test_price_ratios_use_close_on_trade_date():
+    import pandas as pd
+
+    from insider_trade.market import latest_closes, price_ratios
+
+    closes = pd.DataFrame(
+        {"AAA": [10.0, 11.0, 12.0], "BBB": [2.0, 2.0, None]},
+        index=pd.to_datetime(["2026-10-01", "2026-10-02", "2026-10-05"]),
+    )
+    purchases = pd.DataFrame({
+        "ticker": ["AAA", "AAA", "AAA", "BBB", "ZZZ"],
+        "trans_date": ["2026-10-02", "2026-10-02", "2026-10-03", "2026-10-02", "2026-10-02"],  # 10-03 is a Saturday
+        "price": [11.0, 11.0, 11.0, 17.0, 1.0],
+    })
+    assert price_ratios(purchases, closes) == {"AAA": 1.0, "BBB": 8.5}
+    assert latest_closes(closes) == {"AAA": (12.0, "2026-10-05"), "BBB": (2.0, "2026-10-02")}
+
+
+def test_price_ratios_undo_later_splits():
+    import pandas as pd
+
+    from insider_trade.market import price_ratios, split_events
+
+    idx = pd.to_datetime(["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"])
+    closes = pd.DataFrame({"SPL": [50.0, 50.0, 50.0, 51.0]}, index=idx)  # adjusted: pre-split $100 shown as $50
+    splits = pd.DataFrame({"SPL": [0.0, 0.0, 2.0, 0.0]}, index=idx)
+    purchases = pd.DataFrame({"ticker": ["SPL", "SPL"], "trans_date": ["2026-09-01", "2026-09-04"], "price": [100.0, 51.0]})
+    assert price_ratios(purchases, closes, splits) == {"SPL": 1.0}
+    assert split_events(splits) == [("SPL", "2026-09-03", 2.0)]
+
+
+def test_split_adjusts_avg_buy_price(conn):
+    add(conn, 13, "SPL", ceo(131), [("2026-09-01", 1000, 100, 2000), ("2026-10-10", 2000, 50, 6000)])
+    conn.execute(
+        """INSERT INTO market_data (cik, ticker, shares_outstanding, price, price_source, price_ratio)
+           VALUES (13, 'SPL', 1e7, 60.0, 'yahoo', 1.0)"""
+    )
+    conn.execute("INSERT INTO splits (ticker, date, ratio) VALUES ('SPL', '2026-09-03', 2.0)")
+    r = rank(conn, RankParams(as_of=AS_OF)).iloc[0]
+    assert r.avg_buy_price == pytest.approx(50.0)
+    assert r.price_chg == pytest.approx(0.2)
 
 
 def test_latest_shares_sums_classes_from_latest_filing():

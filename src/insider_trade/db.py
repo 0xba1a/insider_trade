@@ -82,7 +82,15 @@ CREATE TABLE IF NOT EXISTS market_data (
     shares_checked_at   TEXT,
     price               REAL,
     price_asof          TEXT,
-    price_source        TEXT
+    price_source        TEXT,
+    price_ratio         REAL   -- median Form 4 price / split-unadjusted market close on trade dates
+);
+
+CREATE TABLE IF NOT EXISTS splits (
+    ticker TEXT NOT NULL,
+    date   TEXT NOT NULL,
+    ratio  REAL NOT NULL,      -- new shares per old share (2.0 for a 2-for-1 split)
+    PRIMARY KEY (ticker, date)
 );
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -99,7 +107,15 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(p)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(market_data)")}
+    if "price_ratio" not in cols:
+        conn.execute("ALTER TABLE market_data ADD COLUMN price_ratio REAL")
+        conn.commit()
 
 
 def save_filing(conn: sqlite3.Connection, f: Filing, source: str) -> int:

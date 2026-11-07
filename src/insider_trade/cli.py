@@ -114,7 +114,7 @@ def cmd_rank(args) -> None:
         t.add_column(name, justify=j, no_wrap=name not in ("Company", "Roles"))
     for i, r in top.iterrows():
         row = [
-            str(i + 1), r.ticker, str(r.company)[:28], f"{r.score:.1f}",
+            str(i + 1), r.ticker + ("*" if r.price_mismatch else ""), str(r.company)[:28], f"{r.score:.1f}",
             _money(r.total_value), _pct(r.pct_mcap, 3), _pct(r.delta_own, 0), str(int(r.n_insiders)),
             r.roles, str(int(r.buy_days)), str(int(r.repeat_buyers)), r.last_buy,
             _num(r.avg_buy_price), _num(r.price), _pct(r.price_chg, 0),
@@ -125,7 +125,8 @@ def cmd_rank(args) -> None:
     console.print(t)
     console.print(
         "[dim]ΔOwn = avg increase in each insider's holdings (capped at 100%). Ins = distinct insiders. "
-        "Days = distinct buy dates. Rpt = insiders buying on 2+ dates. Chg = price vs avg buy.[/]"
+        "Days = distinct buy dates. Rpt = insiders buying on 2+ dates. Chg = price vs avg buy.\n"
+        "* = filing prices don't match the market quote (foreign currency / ADR): $ excluded from cost score.[/]"
     )
 
 
@@ -243,8 +244,10 @@ def main(argv: list[str] | None = None) -> None:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    for noisy in ("urllib3", "yfinance", "peewee"):
+    for noisy in ("urllib3", "peewee"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # yfinance logs an ERROR per delisted/unknown symbol; those fall back to Form 4 prices.
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
     try:
         args.func(args)
     except KeyboardInterrupt:

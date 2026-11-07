@@ -11,6 +11,7 @@ import pandas as pd
 EXEC_ROLES = ("CEO", "CFO", "Officer", "Dir")
 ROLE_ORDER = ["CEO", "CFO", "Officer", "Dir", "10%", "Other"]
 DELTA_OWN_CAP = 1.0  # a new position or doubling counts as 100% for scoring
+PRICE_RATIO_BAND = (0.67, 1.5)
 
 
 @dataclass
@@ -130,7 +131,8 @@ def aggregate(df: pd.DataFrame) -> pd.DataFrame:
     agg["repeat_buyers"] = ig.days.apply(lambda s: int((s >= 2).sum()))
     agg["delta_own"] = ig.delta_own_capped.mean()
     agg["roles"] = ig.role.apply(_roles_summary)
-    agg["avg_buy_price"] = agg.total_value / agg.total_shares
+    adj_shares = (df.shares * df.split_factor) if "split_factor" in df else df.shares
+    agg["avg_buy_price"] = agg.total_value / adj_shares.groupby(df.issuer_cik).sum()  # in today's share terms
     return agg.reset_index()
 
 
@@ -142,16 +144,21 @@ def score(agg: pd.DataFrame, market: pd.DataFrame, p: RankParams) -> pd.DataFram
     if agg.empty:
         return agg
     a = agg.merge(market, left_on="issuer_cik", right_on="cik", how="left")
+    # Filing prices not comparable with the quote (foreign currency, ADR ratio):
+    # market-cap and price-change figures would be meaningless.
+    ratio = a.price_ratio
+    a["price_mismatch"] = ratio.notna() & ((ratio < PRICE_RATIO_BAND[0]) | (ratio > PRICE_RATIO_BAND[1]))
     a["market_cap"] = a.shares_outstanding * a.price
-    a["pct_mcap"] = a.total_value / a.market_cap
-    a["price_chg"] = np.where(a.price_source == "yahoo", a.price / a.avg_buy_price - 1, np.nan)
+    a["pct_mcap"] = (a.total_value / a.market_cap).where(~a.price_mismatch)
+    a.loc[a.pct_mcap > 1, "pct_mcap"] = np.nan  # >100% of market cap means stale share counts
+    a["price_chg"] = np.where((a.price_source == "yahoo") & ~a.price_mismatch, a.price / a.avg_buy_price - 1, np.nan)
 
     a = a[(a.total_value >= p.min_value) & (a.n_insiders >= p.min_insiders)].copy()
     if a.empty:
         return a
 
     cost = pd.concat(
-        [_pct_rank(a.total_value), _pct_rank(a.pct_mcap), _pct_rank(a.delta_own)], axis=1
+        [_pct_rank(a.total_value.where(~a.price_mismatch)), _pct_rank(a.pct_mcap), _pct_rank(a.delta_own)], axis=1
     ).mean(axis=1, skipna=True)
     recurrence = _pct_rank(a.buy_days + a.repeat_buyers)
     insiders = _pct_rank(a.weighted_insiders)
@@ -165,7 +172,7 @@ def score(agg: pd.DataFrame, market: pd.DataFrame, p: RankParams) -> pd.DataFram
 
 def load_market(conn: sqlite3.Connection) -> pd.DataFrame:
     return pd.read_sql_query(
-        "SELECT cik, shares_outstanding, price, price_asof, price_source FROM market_data", conn
+        "SELECT cik, shares_outstanding, price, price_asof, price_source, price_ratio FROM market_data", conn
     )
 
 
@@ -174,9 +181,28 @@ def window(p: RankParams) -> tuple[date, date]:
     return end - timedelta(days=p.window_days), end
 
 
+def load_splits(conn: sqlite3.Connection) -> pd.DataFrame:
+    return pd.read_sql_query("SELECT ticker, date, ratio FROM splits", conn)
+
+
+def apply_splits(df: pd.DataFrame, splits: pd.DataFrame) -> pd.DataFrame:
+    """Add `split_factor`: product of splits after each trade, to restate shares in today's terms."""
+    df = df.copy()
+    df["split_factor"] = 1.0
+    if df.empty or splits.empty:
+        return df
+    for t, g in splits.groupby("ticker"):
+        rows = df.ticker == t
+        if not rows.any():
+            continue
+        for d, r in zip(g.date, g.ratio):
+            df.loc[rows & (df.trans_date < d), "split_factor"] *= r
+    return df
+
+
 def rank(conn: sqlite3.Connection, p: RankParams) -> pd.DataFrame:
     start, end = window(p)
-    df = filter_purchases(load_purchases(conn, start, end), p)
+    df = apply_splits(filter_purchases(load_purchases(conn, start, end), p), load_splits(conn))
     return score(aggregate(df), load_market(conn), p)
 
 

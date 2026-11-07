@@ -65,6 +65,11 @@ Data handling:
 * **Amendments** (4/A) replace the earlier rows for the same issuer, insider and trade date.
 * **10% owners and "other" filers** (mostly funds) are excluded by default; add them back with `--include-funds`.
 * Issuers without a ticker are excluded unless `--include-unlisted` is set.
+* **Splits**: Yahoo quotes are split-adjusted, so the average buy price (and **Chg**, the current
+  price vs that average) is restated in today's share terms using yfinance split events.
+* **Price mismatches**: if Form 4 prices differ from the quote on the trade date by more than
+  1.5× (foreign currency, ordinary shares vs ADR), the ticker is marked `*`: % of market cap and
+  Chg are hidden, and the $ amount is left out of the cost score.
 
 Known limitations: Form 4 also codes IPO and private-placement purchases as `P`, so newly listed
 companies can rank high (check with `insider show`). Prices from yfinance are unofficial.

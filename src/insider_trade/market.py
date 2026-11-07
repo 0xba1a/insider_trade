@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
-import math
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
+
+import numpy as np
+import pandas as pd
 
 from . import config, db
 from .edgar import NotFound, SecClient
@@ -21,7 +23,9 @@ SHARE_CONCEPTS = [
     ("us-gaap/CommonStockSharesOutstanding", False),
     ("us-gaap/WeightedAverageNumberOfSharesOutstandingBasic", False),
 ]
-MAX_SHARES_AGE_DAYS = 730
+MAX_SHARES_AGE_DAYS = 548
+FRESH_SHARES_DAYS = 200
+PRICE_HISTORY = "1y"
 
 
 def refresh_tickers(conn: sqlite3.Connection, client: SecClient) -> int:
@@ -58,16 +62,23 @@ def latest_shares(facts: list[dict], sum_classes: bool) -> tuple[float, str] | N
 
 
 def fetch_shares_outstanding(client: SecClient, cik: int) -> tuple[float, str] | None:
-    cutoff = (date.today() - timedelta(days=MAX_SHARES_AGE_DAYS)).isoformat()
+    """Most recent shares-outstanding value across the concept fallbacks. A concept may be
+    stale (e.g. dei last tagged years ago), so keep looking until one is reasonably fresh."""
+    today = date.today()
+    cutoff = (today - timedelta(days=MAX_SHARES_AGE_DAYS)).isoformat()
+    fresh = (today - timedelta(days=FRESH_SHARES_DAYS)).isoformat()
+    best: tuple[float, str] | None = None
     for concept, sum_classes in SHARE_CONCEPTS:
         try:
             data = client.get_json(CONCEPT_URL.format(cik=cik, concept=concept))
         except NotFound:
             continue
         res = latest_shares(data.get("units", {}).get("shares", []), sum_classes)
-        if res and res[0] > 0 and res[1] >= cutoff:
-            return res
-    return None
+        if res and res[0] > 0 and res[1] >= cutoff and (best is None or res[1] > best[1]):
+            best = res
+        if best and best[1] >= fresh:
+            break
+    return best
 
 
 def active_issuers(conn: sqlite3.Connection, days: int) -> list[sqlite3.Row]:
@@ -124,30 +135,88 @@ def _yahoo_symbol(ticker: str) -> str:
     return ticker.replace(".", "-").upper()
 
 
-def fetch_prices(tickers: list[str], chunk: int = 200) -> dict[str, tuple[float, str]]:
+def fetch_closes(tickers: list[str], period: str = PRICE_HISTORY, chunk: int = 200) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Daily split-adjusted closes and split events (columns = our tickers) from yfinance."""
     import yfinance as yf  # imported lazily; slow import
 
-    out: dict[str, tuple[float, str]] = {}
+    closes, splits = [], []
     for i in range(0, len(tickers), chunk):
         batch = tickers[i : i + chunk]
         symbols = [_yahoo_symbol(t) for t in batch]
         try:
-            df = yf.download(symbols, period="7d", progress=False, auto_adjust=False, threads=True)
+            df = yf.download(symbols, period=period, progress=False, auto_adjust=False, actions=True, threads=True)
         except Exception as e:
             log.warning("yfinance batch failed: %s", e)
             continue
         if df is None or df.empty:
             continue
-        close = df["Close"]
-        if not hasattr(close, "columns"):  # single symbol returns a Series
-            close = close.to_frame(symbols[0])
-        close = close.ffill()
-        last_idx = close.index[-1]
-        for t, s in zip(batch, symbols):
-            if s in close.columns:
-                v = close[s].iloc[-1]
-                if v is not None and not math.isnan(v) and v > 0:
-                    out[t] = (float(v), str(last_idx.date()))
+        for field, out in (("Close", closes), ("Stock Splits", splits)):
+            if field not in df.columns.get_level_values(0):
+                continue
+            f = df[field]
+            if not hasattr(f, "columns"):  # single symbol returns a Series
+                f = f.to_frame(symbols[0])
+            f = f.rename(columns=dict(zip(symbols, batch)))
+            out.append(f[[t for t in batch if t in f.columns]])
+
+    def combine(frames):
+        if not frames:
+            return pd.DataFrame()
+        out = pd.concat(frames, axis=1).sort_index()
+        out.index = pd.to_datetime(out.index).tz_localize(None)
+        return out
+
+    return combine(closes), combine(splits)
+
+
+def latest_closes(closes: pd.DataFrame) -> dict[str, tuple[float, str]]:
+    out = {}
+    for t in closes.columns:
+        s = closes[t].dropna()
+        s = s[s > 0]
+        if not s.empty:
+            out[t] = (float(s.iloc[-1]), str(s.index[-1].date()))
+    return out
+
+
+def _close_on(s: pd.Series, dates: np.ndarray) -> np.ndarray:
+    pos = s.index.searchsorted(dates, side="right") - 1  # last close on or before the date
+    return np.where(pos >= 0, s.to_numpy()[np.clip(pos, 0, None)], np.nan)
+
+
+def split_events(splits: pd.DataFrame) -> list[tuple[str, str, float]]:
+    """(ticker, date, ratio) rows from the yfinance 'Stock Splits' frame."""
+    out = []
+    for t in splits.columns:
+        s = splits[t].dropna()
+        for d, r in s[s > 0].items():
+            if r != 1.0:
+                out.append((t, str(pd.Timestamp(d).date()), float(r)))
+    return out
+
+
+def price_ratios(purchases: pd.DataFrame, closes: pd.DataFrame, splits: pd.DataFrame | None = None) -> dict[str, float]:
+    """Median of (Form 4 price / close on the trade date) per ticker. Yahoo closes are
+    split-adjusted, so they are first restated in the share terms of the trade date. A ratio far
+    from 1 then means the filing's prices aren't in the quote's terms (local currency, ordinary
+    shares vs ADR)."""
+    out = {}
+    for t, g in purchases.groupby("ticker"):
+        if t not in closes.columns:
+            continue
+        s = closes[t].dropna()
+        s = s[s > 0]
+        if s.empty:
+            continue
+        if splits is not None and t in splits.columns:
+            sp = splits[t].reindex(s.index).fillna(0.0).replace(0.0, 1.0)
+            if (sp != 1.0).any():
+                after = sp[::-1].cumprod()[::-1] / sp  # product of splits strictly after each date
+                s = s * after
+        ratios = g.price.to_numpy(dtype=float) / _close_on(s, pd.to_datetime(g.trans_date).to_numpy())
+        ratios = ratios[np.isfinite(ratios)]
+        if len(ratios):
+            out[t] = float(np.median(ratios))
     return out
 
 
@@ -155,22 +224,31 @@ def refresh_prices(conn: sqlite3.Connection, issuers: list[sqlite3.Row]) -> tupl
     """Update prices from yfinance; fall back to the latest Form 4 purchase price.
     Returns (n_yahoo, n_fallback)."""
     tickers = sorted({r["ticker"] for r in issuers})
-    prices = fetch_prices(tickers) if tickers else {}
-    fallback = {
-        r["issuer_cik"]: (r["price"], r["trans_date"])
-        for r in conn.execute(
-            """
-            SELECT f.issuer_cik, p.price, p.trans_date FROM purchases p JOIN filings f USING (accession)
-            WHERE p.price > 0 AND p.shares > 0
-            ORDER BY p.trans_date
-            """
+    closes, splits = fetch_closes(tickers) if tickers else (pd.DataFrame(), pd.DataFrame())
+    prices = latest_closes(closes)
+    since = (date.today() - timedelta(days=365)).isoformat()
+    purchases = pd.read_sql_query(
+        """
+        SELECT f.issuer_cik AS cik, COALESCE(t.ticker, f.issuer_symbol) AS ticker, p.trans_date, p.price
+        FROM purchases p JOIN filings f USING (accession) LEFT JOIN tickers t ON t.cik = f.issuer_cik
+        WHERE p.price > 0 AND p.shares > 0 AND p.trans_date >= ?
+        ORDER BY p.trans_date
+        """,
+        conn, params=(since,),
+    )
+    ratios = price_ratios(purchases, closes, splits) if not closes.empty else {}
+    if not splits.empty:
+        conn.executemany(
+            "INSERT OR REPLACE INTO splits (ticker, date, ratio) VALUES (?,?,?)", split_events(splits)
         )
-    }  # later rows overwrite earlier ones -> latest purchase price
+    fallback = {r.cik: (r.price, r.trans_date) for r in purchases.itertuples()}  # latest wins
     n_y = n_f = 0
     for r in issuers:
+        ratio = None
         if r["ticker"] in prices:
             price, asof = prices[r["ticker"]]
             source = "yahoo"
+            ratio = ratios.get(r["ticker"])
             n_y += 1
         elif r["cik"] in fallback:
             price, asof = fallback[r["cik"]]
@@ -179,10 +257,12 @@ def refresh_prices(conn: sqlite3.Connection, issuers: list[sqlite3.Row]) -> tupl
         else:
             continue
         conn.execute(
-            """INSERT INTO market_data (cik, ticker, price, price_asof, price_source) VALUES (?,?,?,?,?)
+            """INSERT INTO market_data (cik, ticker, price, price_asof, price_source, price_ratio)
+               VALUES (?,?,?,?,?,?)
                ON CONFLICT(cik) DO UPDATE SET ticker=excluded.ticker, price=excluded.price,
-                 price_asof=excluded.price_asof, price_source=excluded.price_source""",
-            (r["cik"], r["ticker"], price, asof, source),
+                 price_asof=excluded.price_asof, price_source=excluded.price_source,
+                 price_ratio=excluded.price_ratio""",
+            (r["cik"], r["ticker"], price, asof, source, ratio),
         )
     conn.commit()
     return n_y, n_f

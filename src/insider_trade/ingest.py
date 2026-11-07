@@ -30,10 +30,10 @@ def index_url(d: date) -> str:
     return f"{ARCHIVES}edgar/daily-index/{d.year}/QTR{q}/form.{d:%Y%m%d}.idx"
 
 
-def parse_form_index(text: str) -> list[tuple[str, str, str]]:
-    """Return unique (accession, form_type, path) for Form 4 / 4/A entries.
-    Each filing appears once per filer (issuer and each owner), so dedupe by accession."""
-    seen: dict[str, tuple[str, str, str]] = {}
+def parse_form_index(text: str) -> list[tuple[str, str, list[str]]]:
+    """Return unique (accession, form_type, paths) for Form 4 / 4/A entries.
+    Each filing appears once per filer (issuer and each owner), with one path per filer."""
+    seen: dict[str, tuple[str, str, list[str]]] = {}
     for line in text.splitlines():
         if not (line.startswith("4 ") or line.startswith("4/A ")):
             continue
@@ -42,7 +42,7 @@ def parse_form_index(text: str) -> list[tuple[str, str, str]]:
             continue
         form_type, _cik, _date, path = m.groups()
         accession = path.rsplit("/", 1)[-1][:-4]
-        seen.setdefault(accession, (accession, form_type, path))
+        seen.setdefault(accession, (accession, form_type, []))[2].append(path)
     return list(seen.values())
 
 
@@ -59,8 +59,14 @@ def ingest_date(conn: sqlite3.Connection, client: SecClient, d: date, workers: i
     errors = 0
 
     def fetch(entry):
-        accession, form_type, path = entry
-        text = client.get_text(ARCHIVES + path)
+        accession, form_type, paths = entry
+        for i, path in enumerate(paths):
+            try:
+                text = client.get_text(ARCHIVES + path)
+                break
+            except NotFound:
+                if i == len(paths) - 1:
+                    raise
         return parse_submission(text, accession, filing_date, form_type)
 
     with ThreadPoolExecutor(max_workers=workers or config.SEC_WORKERS) as pool:

@@ -13,6 +13,13 @@ class NotFound(Exception):
     pass
 
 
+def _is_missing_object(r: requests.Response) -> bool:
+    """Missing files under /Archives (e.g. the daily index on holidays) come back from the
+    S3 backend as 403 AccessDenied XML. Throttling 403s are HTML pages instead."""
+    body = r.text[:500]
+    return "<Code>AccessDenied</Code>" in body or "<Code>NoSuchKey</Code>" in body
+
+
 class _RateLimiter:
     def __init__(self, rps: float):
         self.interval = 1.0 / rps
@@ -54,7 +61,7 @@ class SecClient:
             else:
                 if r.status_code == 200:
                     return r
-                if r.status_code == 404:
+                if r.status_code == 404 or (r.status_code == 403 and _is_missing_object(r)):
                     raise NotFound(url)
                 # 403 is what SEC returns when throttling, so it's retried too.
                 if r.status_code not in (403, 429, 500, 502, 503, 504) or attempt == retries - 1:
