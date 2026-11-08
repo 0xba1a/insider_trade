@@ -93,6 +93,31 @@ CREATE TABLE IF NOT EXISTS splits (
     PRIMARY KEY (ticker, date)
 );
 
+-- Daily ranking (default parameters) as of each ingested filing date.
+CREATE TABLE IF NOT EXISTS rank_snapshots (
+    as_of       TEXT    NOT NULL,
+    rank        INTEGER NOT NULL,
+    cik         INTEGER NOT NULL,
+    ticker      TEXT,
+    score       REAL,
+    total_value REAL,
+    PRIMARY KEY (as_of, cik)
+);
+
+-- Changes between consecutive snapshots (first_time, new_entry, big_move, new_buys).
+CREATE TABLE IF NOT EXISTS rank_events (
+    as_of     TEXT    NOT NULL,
+    cik       INTEGER NOT NULL,
+    event     TEXT    NOT NULL,
+    ticker    TEXT,
+    company   TEXT,
+    rank      INTEGER,
+    prev_rank INTEGER,
+    value     REAL,
+    detail    TEXT,
+    PRIMARY KEY (as_of, cik, event)
+);
+
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 

@@ -24,5 +24,8 @@ insider = "insider_trade.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+insider_trade = ["site/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

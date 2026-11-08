@@ -12,6 +12,7 @@ EXEC_ROLES = ("CEO", "CFO", "Officer", "Dir")
 ROLE_ORDER = ["CEO", "CFO", "Officer", "Dir", "10%", "Other"]
 DELTA_OWN_CAP = 1.0  # a new position or doubling counts as 100% for scoring
 PRICE_RATIO_BAND = (0.67, 1.5)
+PRICE_OUTLIER_FACTOR = 50.0
 
 
 @dataclass
@@ -37,9 +38,9 @@ def load_purchases(conn: sqlite3.Connection, start: date, end: date) -> pd.DataF
         FROM purchases p
         JOIN filings f USING (accession)
         LEFT JOIN tickers t ON t.cik = f.issuer_cik
-        WHERE p.trans_date BETWEEN ? AND ? AND p.shares > 0 AND p.price > 0
+        WHERE p.trans_date BETWEEN ? AND ? AND f.filing_date <= ? AND p.shares > 0 AND p.price > 0
     """
-    return pd.read_sql_query(q, conn, params=(start.isoformat(), end.isoformat()))
+    return pd.read_sql_query(q, conn, params=(start.isoformat(), end.isoformat(), end.isoformat()))
 
 
 def apply_amendments(df: pd.DataFrame) -> pd.DataFrame:
@@ -73,13 +74,24 @@ def dedupe_related_filers(df: pd.DataFrame) -> pd.DataFrame:
     return d[d.accession == first_acc].sort_index()
 
 
+def drop_price_outliers(df: pd.DataFrame, factor: float = PRICE_OUTLIER_FACTOR) -> pd.DataFrame:
+    """Drop rows priced `factor`× above the issuer's median purchase price (needs 3+ rows).
+    Catches decimal slips that inflate the $ total, e.g. 614.00 reported for 6.14. Low prices are
+    kept: they are usually real (ordinary shares vs ADRs, pre-split prices)."""
+    if df.empty:
+        return df
+    g = df.groupby("issuer_cik").price
+    med, n = g.transform("median"), g.transform("size")
+    return df[(n < 3) | (df.price <= med * factor)]
+
+
 def filter_purchases(df: pd.DataFrame, p: RankParams) -> pd.DataFrame:
     df = dedupe_related_filers(apply_amendments(df))
     if not p.include_funds:
         df = df[df.owner_role.isin(EXEC_ROLES)]
     if not p.include_unlisted:
         df = df[df.ticker.notna() & (df.ticker != "")]
-    return df
+    return drop_price_outliers(df)
 
 
 def insider_delta_own(df: pd.DataFrame) -> pd.DataFrame:
@@ -200,10 +212,15 @@ def apply_splits(df: pd.DataFrame, splits: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def rank(conn: sqlite3.Connection, p: RankParams) -> pd.DataFrame:
+def rank_with_purchases(conn: sqlite3.Connection, p: RankParams) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The ranking and the filtered purchase rows behind it."""
     start, end = window(p)
     df = apply_splits(filter_purchases(load_purchases(conn, start, end), p), load_splits(conn))
-    return score(aggregate(df), load_market(conn), p)
+    return score(aggregate(df), load_market(conn), p), df
+
+
+def rank(conn: sqlite3.Connection, p: RankParams) -> pd.DataFrame:
+    return rank_with_purchases(conn, p)[0]
 
 
 def ticker_detail(conn: sqlite3.Connection, ticker: str, p: RankParams) -> pd.DataFrame:

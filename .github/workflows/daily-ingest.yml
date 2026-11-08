@@ -12,7 +12,7 @@ on:
         default: "0"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ingest
@@ -22,13 +22,17 @@ jobs:
   ingest:
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    permissions:
+      contents: write
+    outputs:
+      site: ${{ steps.upload.outcome }}
     env:
       SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
       INSIDER_DB: data/insider.db
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -49,7 +53,14 @@ jobs:
 
       - name: Backfill
         if: ${{ inputs.backfill_days != '' && inputs.backfill_days != '0' }}
-        run: insider backfill --days "${{ inputs.backfill_days }}"
+        env:
+          DAYS: ${{ inputs.backfill_days }}
+        run: |
+          insider backfill --days "$DAYS"
+          # Daily history snapshots need a full 90-day window behind them.
+          if [ "$DAYS" -gt 90 ]; then
+            insider snapshots --since "$(date -u -d "$((DAYS - 90)) days ago" +%F)"
+          fi
 
       - name: Ingest new filings
         run: insider ingest
@@ -60,6 +71,12 @@ jobs:
         run: insider market
 
       - run: insider status
+
+      - name: Build report (README section + site)
+        id: report
+        # Report whatever was ingested, even if a later day failed.
+        if: ${{ !cancelled() && steps.restore.outcome == 'success' }}
+        run: insider report --readme README.md --site site --repo "$GITHUB_REPOSITORY"
 
       - name: Publish database to data branch
         # Publish partial progress too (each ingested day is committed atomically),
@@ -82,3 +99,39 @@ jobs:
               commit -qm "Insider DB $(date -u +%F)"
           # Single-commit branch, force-pushed, so the repo doesn't grow by a DB copy per day.
           git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+
+      - name: Commit README
+        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
+        run: |
+          if git diff --quiet -- README.md; then echo "README unchanged"; exit 0; fi
+          asof=$(python -c "import sqlite3; print(sqlite3.connect('data/insider.db').execute('SELECT MAX(as_of) FROM rank_snapshots').fetchone()[0])")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qm "Update insider ranking (filings through $asof)" -- README.md
+          for attempt in 1 2 3; do
+            git pull -q --rebase origin main && git push -q origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
+
+      - name: Upload site
+        id: upload
+        if: ${{ !cancelled() && steps.report.outcome == 'success' }}
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: ingest
+    # Deploy whenever a site artifact was built, even if another ingest step failed.
+    if: ${{ !cancelled() && needs.ingest.outputs.site == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

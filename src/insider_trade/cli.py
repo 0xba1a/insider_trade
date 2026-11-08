@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import math
 import os
 import shutil
 import sys
@@ -15,6 +14,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import config, db
+from .fmt import money as _money, num as _num, pct as _pct
 from .rank import RankParams, rank, ticker_detail
 
 console = Console()
@@ -24,29 +24,6 @@ DATA_BRANCH = "data"
 
 def _date(s: str) -> date:
     return date.fromisoformat(s)
-
-
-def _money(v: float | None) -> str:
-    if v is None or (isinstance(v, float) and math.isnan(v)):
-        return "-"
-    for unit, div in (("B", 1e9), ("M", 1e6), ("K", 1e3)):
-        if abs(v) >= div:
-            return f"${v / div:.1f}{unit}"
-    return f"${v:,.0f}"
-
-
-def _pct(v: float | None, digits: int = 1) -> str:
-    if v is None or (isinstance(v, float) and (math.isnan(v))):
-        return "-"
-    if math.isinf(v):
-        return "new"
-    return f"{v * 100:.{digits}f}%"
-
-
-def _num(v: float | None, fmt: str = "{:,.2f}") -> str:
-    if v is None or (isinstance(v, float) and math.isnan(v)):
-        return "-"
-    return fmt.format(v)
 
 
 # ---------------------------------------------------------------- commands
@@ -168,6 +145,40 @@ def cmd_status(args) -> None:
                   f"{md[2] or 0} Yahoo prices (as of {md[3]})")
 
 
+def _site_url(repo: str) -> str:
+    owner, name = repo.split("/", 1)
+    return f"https://{owner.lower()}.github.io/{name}/"
+
+
+def cmd_report(args) -> None:
+    from pathlib import Path
+
+    from .report import data_asof, render_readme, site_payload, take_snapshot, update_readme, write_site
+
+    conn = db.connect()
+    as_of = args.as_of or data_asof(conn)
+    if as_of is None:
+        raise SystemExit("No ingested data yet.")
+    ranked, purchases = take_snapshot(conn, as_of, top_n=args.top)
+    console.print(f"Snapshot {as_of}: {len(ranked)} stocks ranked")
+    site_url = args.site_url or _site_url(args.repo)
+    if args.readme:
+        changed = update_readme(Path(args.readme), render_readme(conn, as_of, ranked, site_url, args.top))
+        console.print(f"{args.readme}: {'updated' if changed else 'unchanged'}")
+    if args.site:
+        write_site(Path(args.site), site_payload(conn, as_of, ranked, purchases, args.repo, args.top), ranked)
+        console.print(f"Site written to {args.site}/")
+
+
+def cmd_snapshots(args) -> None:
+    from .report import backfill_snapshots, data_asof
+
+    conn = db.connect()
+    until = args.until or data_asof(conn)
+    n = backfill_snapshots(conn, args.since, until, force=args.force)
+    console.print(f"{n} snapshots computed ({args.since} → {until})")
+
+
 def cmd_sync(args) -> None:
     url = f"https://raw.githubusercontent.com/{args.repo}/{DATA_BRANCH}/data/insider.db"
     dest = config.db_path()
@@ -231,6 +242,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("status", help="database summary")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("report", help="snapshot today's ranking; write the README section and static site")
+    p.add_argument("--as-of", type=_date, default=None, help="snapshot date (default: last ingested filing date)")
+    p.add_argument("--top", type=int, default=30, help="stocks in the README table / tracked for changes")
+    p.add_argument("--readme", help="README to update between the insider-report markers")
+    p.add_argument("--site", help="directory to write the static site to")
+    p.add_argument("--repo", default=DEFAULT_REPO, help=f"owner/name (default {DEFAULT_REPO})")
+    p.add_argument("--site-url", help="published site URL (default: GitHub Pages URL of --repo)")
+    p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("snapshots", help="compute historical daily ranking snapshots and change events")
+    p.add_argument("--since", type=_date, required=True)
+    p.add_argument("--until", type=_date, help="default: last ingested filing date")
+    p.add_argument("--force", action="store_true", help="recompute existing snapshots")
+    p.set_defaults(func=cmd_snapshots)
 
     p = sub.add_parser("sync", help="download the latest database from the GitHub data branch")
     p.add_argument("--repo", default=DEFAULT_REPO, help=f"owner/name (default {DEFAULT_REPO})")
