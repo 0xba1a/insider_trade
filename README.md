@@ -16,7 +16,7 @@ Everything below is updated automatically every weekday by GitHub Actions. You d
 
 | Filed through | Ticker | Company | Rank | Change |
 |---|---|---|--:|---|
-| 2026-11-06 | [KOD](https://0xba1a.github.io/insider_trade/#KOD) | Kodiak Sciences Inc. | 18 | ⬆️ Entered the top 30 (was #82)<br>💵 New buys filed: $24.3M · 1 insider: Dir |
+| 2026-11-06 | [KOD](https://0xba1a.github.io/insider_trade/#KOD) | Kodiak Sciences Inc. | 19 | ⬆️ Entered the top 30 (was #82)<br>💵 New buys filed: $24.3M · 1 insider: Dir |
 | 2026-11-06 | [MTDR](https://0xba1a.github.io/insider_trade/#MTDR) | Matador Resources Co | 30 | ⬆️ Entered the top 30 (was #36)<br>💵 New buys filed: $92.8K · 2 insiders: CEO, Officer |
 | 2026-11-06 | [AGMB](https://0xba1a.github.io/insider_trade/#AGMB) | AgomAb Therapeutics NV | 15 | ▲ 8 places (#23 → #15)<br>💵 New buys filed: $103.5K · 1 insider: Dir |
 | 2026-11-02 | [BWMX](https://0xba1a.github.io/insider_trade/#BWMX) | BETTERWARE DE MEXICO, S.A.P.I. D | 28 | ▼ 6 places (#22 → #28) |
@@ -32,7 +32,7 @@ Everything below is updated automatically every weekday by GitHub Actions. You d
 | 5 | ▲1 | [GME](https://0xba1a.github.io/insider_trade/#GME) | GameStop Corp. | 91.0 | $99.2M | 0.78% | 42% | 5 | CEO, 4 Dir | 8 | 2026-10-13 | 7% |
 | 6 | ▼1 | [LIEN](https://0xba1a.github.io/insider_trade/#LIEN) | Chicago Atlantic BDC, Inc. | 91.0 | $657.7K | 0.32% | 100% | 4 | CEO, 3 Officer | 11 | 2026-08-31 | -6% |
 | 7 | – | [HELP](https://0xba1a.github.io/insider_trade/#HELP) | Helus Pharma Inc. | 90.7 | $8.4M | - | 54% | 4 | CEO, CFO, 2 Officer | 7 | 2026-09-29 | -27% |
-| 8 | – | [PRTS](https://0xba1a.github.io/insider_trade/#PRTS) | CarParts.com, Inc. | 90.4 | $2.0M | 2.95% | 60% | 3 | CEO, Officer, Dir | 8 | 2026-09-10 | -8% |
+| 8 | – | [PRTS](https://0xba1a.github.io/insider_trade/#PRTS) | CarParts.com, Inc. | 90.5 | $2.0M | 2.95% | 60% | 3 | CEO, Officer, Dir | 8 | 2026-09-10 | -8% |
 | 9 | ▲1 | [XRN](https://0xba1a.github.io/insider_trade/#XRN) | Chiron Real Estate Inc. | 90.3 | $2.6M | 0.68% | 67% | 4 | CEO, 2 Officer, Dir | 5 | 2026-08-17 | -20% |
 | 10 | ▼1 | [NPB](https://0xba1a.github.io/insider_trade/#NPB) | NORTHPOINTE BANCSHARES INC | 90.3 | $4.6M | 0.84% | 78% | 4 | CEO, Officer, 2 Dir | 6 | 2026-10-28 | -3% |
 | 11 | – | [ALP](https://0xba1a.github.io/insider_trade/#ALP) | Alpha Compute Corp | 89.6 | $314.6K | 0.45% | 100% | 4 | CEO, CFO, 2 Officer | 7 | 2026-10-07 | -32% |
@@ -42,8 +42,8 @@ Everything below is updated automatically every weekday by GitHub Actions. You d
 | 15 | ▲8 💵 | [AGMB](https://0xba1a.github.io/insider_trade/#AGMB) | AgomAb Therapeutics NV | 87.0 | $503.5K | 0.19% | 100% | 3 | CEO, CFO, Dir | 5 | 2026-11-05 | -7% |
 | 16 | ▼1 | [EQPT](https://0xba1a.github.io/insider_trade/#EQPT) | EquipmentShare.com Inc | 86.9 | $1.7M | 0.15% | 71% | 2 | 2 CEO | 10 | 2026-09-15 | -18% |
 | 17 | ▼1 | [VENU](https://0xba1a.github.io/insider_trade/#VENU) | Venu Holding Corp | 86.6 | $971.1K | 1.33% | 35% | 3 | CEO, 2 Dir | 12 | 2026-09-29 | -26% |
-| 18 | ⬆️ #82 💵 | [KOD](https://0xba1a.github.io/insider_trade/#KOD) | Kodiak Sciences Inc. | 86.5 | $181.3M | 2.91% | 34% | 4 | 4 Dir | 4 | 2026-11-05 | 20% |
-| 19 | ▼2 | [GAM](https://0xba1a.github.io/insider_trade/#GAM)\* | GENERAL AMERICAN INVESTORS CO IN | 86.5 | $444.8K | - | 73% | 4 | CEO, 3 Officer | 5 | 2026-09-23 | - |
+| 18 | ▼1 | [GAM](https://0xba1a.github.io/insider_trade/#GAM)\* | GENERAL AMERICAN INVESTORS CO IN | 86.5 | $444.8K | - | 73% | 4 | CEO, 3 Officer | 5 | 2026-09-23 | - |
+| 19 | ⬆️ #82 💵 | [KOD](https://0xba1a.github.io/insider_trade/#KOD) | Kodiak Sciences Inc. | 86.5 | $181.3M | 2.91% | 34% | 4 | 4 Dir | 4 | 2026-11-05 | 20% |
 | 20 | ▼1 | [FUL](https://0xba1a.github.io/insider_trade/#FUL) | FULLER H B CO | 85.9 | $1.1M | 0.04% | 89% | 9 | Officer, 8 Dir | 5 | 2026-10-16 | 0% |
 | 21 | ▼1 | [JUSH](https://0xba1a.github.io/insider_trade/#JUSH) | Jushi Holdings Inc. | 85.8 | $1.0M | 1.16% | 38% | 2 | 2 CEO | 7 | 2026-09-18 | -11% |
 | 22 | ▼4 | [AMRC](https://0xba1a.github.io/insider_trade/#AMRC) | Ameresco, Inc. | 85.7 | $1.8M | 0.16% | 30% | 4 | CEO, 3 Dir | 8 | 2026-08-28 | -8% |
