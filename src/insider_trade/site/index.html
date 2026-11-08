@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Insider buying ranking — US stocks</title>
+<meta name="description" content="US stocks ranked daily by SEC Form 4 insider open-market purchases.">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de; --head: #f6f8fa;
+    --hover: #f3f6fa; --accent: #0969da; --up: #1a7f37; --down: #cf222e; --new: #8250df; --buy: #9a6700;
+    --chip: #eaeef2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --border: #30363d; --head: #161b22;
+      --hover: #1c2129; --accent: #4493f8; --up: #3fb950; --down: #f85149; --new: #a371f7; --buy: #d29922;
+      --chip: #21262d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+         background: var(--bg); color: var(--fg); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header { padding: 20px 24px 8px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .meta { color: var(--muted); }
+  .meta span + span::before { content: " · "; }
+  nav { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--border); margin-top: 12px; }
+  nav button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 14px;
+               font: inherit; color: var(--muted); cursor: pointer; }
+  nav button.active { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  main { padding: 12px 24px 40px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 4px 0 12px; }
+  input[type=search], select { font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+                               background: var(--bg); color: var(--fg); }
+  input[type=search] { width: 240px; }
+  label { color: var(--muted); user-select: none; }
+  .chip { display: inline-flex; gap: 4px; align-items: center; padding: 3px 10px; border-radius: 12px;
+          background: var(--chip); cursor: pointer; }
+  .wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  th { background: var(--head); position: sticky; top: 0; font-weight: 600; cursor: pointer; user-select: none; }
+  th.num, td.num { text-align: right; }
+  th.sorted::after { content: " ▾"; }
+  th.sorted.asc::after { content: " ▴"; }
+  tbody tr.row { cursor: pointer; }
+  tbody tr.row:hover { background: var(--hover); }
+  tr.top td:first-child { box-shadow: inset 3px 0 var(--accent); }
+  td.company { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+  td.roles { white-space: normal; min-width: 140px; }
+  .up { color: var(--up); } .down { color: var(--down); } .new { color: var(--new); font-weight: 600; }
+  .buy { color: var(--buy); }
+  .muted { color: var(--muted); }
+  .tick { font-weight: 600; }
+  .flag { color: var(--muted); cursor: help; }
+  tr.detail > td { background: var(--head); white-space: normal; padding: 12px 16px 16px; }
+  .detail h3 { margin: 0 0 6px; font-size: 15px; }
+  .detail .links a { margin-right: 14px; }
+  .detail .facts { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 8px 0 10px; }
+  .detail .facts div b { display: block; font-size: 12px; color: var(--muted); font-weight: 500; }
+  .detail table { background: var(--bg); }
+  .detail th { position: static; cursor: default; }
+  .day td { background: var(--head); font-weight: 600; }
+  .pager { margin-top: 10px; color: var(--muted); }
+  .pager button { font: inherit; margin-left: 8px; }
+  details.method { margin-top: 24px; color: var(--muted); max-width: 900px; }
+  details.method summary { cursor: pointer; color: var(--fg); }
+  footer { padding: 0 24px 24px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Insider buying ranking</h1>
+  <div class="meta" id="meta">Loading…</div>
+</header>
+<nav>
+  <button data-tab="ranking" class="active">Ranking</button>
+  <button data-tab="changes">Changes</button>
+</nav>
+<main>
+  <section id="tab-ranking">
+    <div class="controls">
+      <input type="search" id="q" placeholder="Search ticker or company…" autocomplete="off">
+      <label>Min insiders
+        <select id="minins"><option>1</option><option>2</option><option>3</option><option>5</option></select>
+      </label>
+      <label><input type="checkbox" id="hidemis"> Hide ADR / foreign-currency filers</label>
+      <span class="muted" id="count"></span>
+    </div>
+    <div class="wrap"><table id="rank"><thead></thead><tbody></tbody></table></div>
+    <div class="pager" id="pager"></div>
+    <details class="method">
+      <summary>How the score works</summary>
+      <p>Only open-market purchases (Form 4 code <b>P</b>) by officers and directors with a trade date in the
+        window count. 10% owners and funds, grants, option exercises and sales are ignored.</p>
+      <ul>
+        <li><b>Cost</b>: average percentile of total $ bought, $ bought as % of market cap, and ΔOwn
+          (shares bought ÷ shares held before the first buy, capped at 100%).</li>
+        <li><b>Recurrence</b>: percentile of distinct buy days + insiders who bought on 2 or more days.</li>
+        <li><b>Insiders</b>: percentile of distinct insiders weighted by role (CEO/CFO/President 3, other officers 2,
+          directors 1.5).</li>
+      </ul>
+      <p id="weights"></p>
+      <p>Form 4 also codes IPO and private-placement purchases as P, so newly listed companies can rank high.
+        Prices come from Yahoo Finance and are unofficial. Not investment advice.</p>
+    </details>
+  </section>
+  <section id="tab-changes" hidden>
+    <div class="controls">
+      <input type="search" id="cq" placeholder="Search ticker or company…" autocomplete="off">
+      <span id="evchips"></span>
+      <label><input type="checkbox" id="toponly" checked> <span id="toplabel">Top 30 only</span></label>
+      <span class="muted" id="ccount"></span>
+    </div>
+    <div class="wrap"><table id="changes"><thead><tr>
+      <th>Ticker</th><th>Company</th><th class="num">Rank</th><th>Change</th>
+    </tr></thead><tbody></tbody></table></div>
+    <div class="pager" id="cpager"></div>
+  </section>
+</main>
+<footer id="foot"></footer>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const money = (v) => {
+  if (v == null) return "-";
+  for (const [u, d] of [["B", 1e9], ["M", 1e6], ["K", 1e3]]) if (Math.abs(v) >= d) return "$" + (v / d).toFixed(1) + u;
+  return "$" + Math.round(v).toLocaleString();
+};
+const pct = (v, d = 1) => (v == null ? "-" : (v * 100).toFixed(d) + "%");
+const num = (v, d = 2) => (v == null ? "-" : v.toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d}));
+const int = (v) => (v == null ? "-" : Math.round(v).toLocaleString());
+const records = (fields, rows) => rows.map((r) => Object.fromEntries(fields.map((f, i) => [f, r[i]])));
+
+let D, RANK, EVENTS, PURCH;
+const ORDER = {first_time: 0, new_entry: 1, big_move: 2, new_buys: 3};
+const EV = {
+  first_time: ["🆕", "First insider buying"],
+  new_entry: ["⬆️", "Entered the top N"],
+  big_move: ["↕️", "Big move"],
+  new_buys: ["💵", "New buys filed"],
+};
+const state = {sort: "rank", asc: true, page: 0, open: null, cpage: 0, types: new Set(Object.keys(EV))};
+const PAGE = 100, CPAGE = 200;
+
+const COLS = [
+  ["rank", "#", "num"], ["delta", "Δ", ""], ["ticker", "Ticker", ""], ["company", "Company", "company"],
+  ["score", "Score", "num"], ["total_value", "$ Bought", "num"], ["pct_mcap", "% MCap", "num"],
+  ["delta_own", "ΔOwn", "num"], ["n_insiders", "Insiders", "num"], ["roles", "Roles", "roles"],
+  ["buy_days", "Buy days", "num"], ["last_buy", "Last buy", ""], ["avg_buy_price", "Avg buy", "num"],
+  ["price", "Price", "num"], ["price_chg", "Chg", "num"],
+];
+
+function deltaHtml(r) {
+  const n = D.top_n;
+  if (r.prev_rank == null) return '<span class="new" title="Newly ranked">🆕</span>';
+  if (r.prev_rank > n && r.rank <= n) return `<span class="up" title="Entered the top ${n}">⬆️ #${r.prev_rank}</span>`;
+  const d = r.prev_rank - r.rank;
+  if (d > 0) return `<span class="up">▲${d}</span>`;
+  if (d < 0) return `<span class="down">▼${-d}</span>`;
+  return '<span class="muted">–</span>';
+}
+
+function cell(r, key) {
+  switch (key) {
+    case "delta": return deltaHtml(r);
+    case "ticker": return `<span class="tick">${esc(r.ticker)}</span>` + (r.price_mismatch
+      ? ' <span class="flag" title="Filing prices are not in the quote\'s currency/terms (ADR, foreign currency): % MCap and Chg hidden">*</span>'
+      : "");
+    case "company": return `<span title="${esc(r.company)}">${esc(r.company)}</span>`;
+    case "score": return r.score.toFixed(1);
+    case "total_value": return money(r.total_value);
+    case "pct_mcap": return pct(r.pct_mcap, 3);
+    case "delta_own": return pct(r.delta_own, 0);
+    case "avg_buy_price": case "price": return num(r[key]);
+    case "price_chg":
+      if (r.price_chg == null) return "-";
+      return `<span class="${r.price_chg >= 0 ? "up" : "down"}">${pct(r.price_chg, 0)}</span>`;
+    default: return esc(r[key] ?? "-");
+  }
+}
+
+function sortValue(r, k) {
+  if (k === "delta") return r.prev_rank == null ? 1e9 : r.prev_rank - r.rank;
+  return r[k];
+}
+
+function filteredRanking() {
+  const q = $("#q").value.trim().toLowerCase();
+  const minIns = +$("#minins").value;
+  const hide = $("#hidemis").checked;
+  const list = RANK.filter((r) => r.n_insiders >= minIns && !(hide && r.price_mismatch) &&
+    (!q || r.ticker.toLowerCase().includes(q) || String(r.company).toLowerCase().includes(q)));
+  return list.sort((a, b) => {
+    const x = sortValue(a, state.sort), y = sortValue(b, state.sort);
+    if (x == null && y == null) return a.rank - b.rank;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    const c = typeof x === "string" ? x.localeCompare(y) : x - y;
+    return (state.asc ? c : -c) || a.rank - b.rank;
+  });
+}
+
+function renderRanking() {
+  $("#rank thead").innerHTML = "<tr>" + COLS.map(([k, label, cls]) => {
+    const sorted = state.sort === k ? " sorted" + (state.asc ? " asc" : "") : "";
+    return `<th data-k="${k}" class="${cls === "num" ? "num" : ""}${sorted}">${label}</th>`;
+  }).join("") + "</tr>";
+  const list = filteredRanking();
+  const pages = Math.max(1, Math.ceil(list.length / PAGE));
+  state.page = Math.min(Math.max(state.page, 0), pages - 1);
+  const shown = list.slice(state.page * PAGE, (state.page + 1) * PAGE);
+  $("#rank tbody").innerHTML = shown.map((r) =>
+    `<tr class="row${r.rank <= D.top_n ? " top" : ""}" data-cik="${r.issuer_cik}">` +
+    COLS.map(([k, , cls]) => `<td class="${cls}">${cell(r, k)}</td>`).join("") + "</tr>" +
+    (state.open === r.issuer_cik ? detailRow(r) : "")).join("");
+  $("#count").textContent = `${list.length.toLocaleString()} of ${RANK.length.toLocaleString()} stocks`;
+  $("#pager").innerHTML = pages > 1
+    ? `Page ${state.page + 1} of ${pages}<button id="prev" ${state.page ? "" : "disabled"}>‹ Prev</button>` +
+      `<button id="next" ${state.page < pages - 1 ? "" : "disabled"}>Next ›</button>`
+    : "";
+}
+
+function eventText(e) {
+  const n = D.top_n;
+  switch (e.event) {
+    case "first_time": return `<span class="new">🆕 First insider buying</span> — ${money(e.value)} · ${esc(e.detail)}`;
+    case "new_entry": return `<span class="up">⬆️ Entered the top ${n}</span> (was #${e.prev_rank})`;
+    case "big_move": {
+      const up = e.prev_rank > e.rank;
+      return `<span class="${up ? "up" : "down"}">${up ? "▲" : "▼"} ${Math.abs(e.prev_rank - e.rank)} places</span> (#${e.prev_rank} → #${e.rank})`;
+    }
+    case "new_buys": return `<span class="buy">💵 New buys filed</span> — ${money(e.value)} · ${esc(e.detail)}`;
+    default: return esc(e.event);
+  }
+}
+
+function detailRow(r) {
+  const p = PURCH[r.issuer_cik] || [];
+  const cik = String(r.issuer_cik).padStart(10, "0");
+  const evs = EVENTS.filter((e) => e.cik === r.issuer_cik).slice(0, 10);
+  const facts = [
+    ["Score", r.score.toFixed(1)],
+    ["Cost / Recurrence / Insiders", `${r.s_cost.toFixed(0)} / ${r.s_recurrence.toFixed(0)} / ${r.s_insiders.toFixed(0)}`],
+    ["Market cap", money(r.market_cap)], ["Transactions", int(r.n_tx)], ["Repeat buyers", int(r.repeat_buyers)],
+    ["First buy", esc(r.first_buy)], ["Price", r.price == null ? "-" : `${num(r.price)} (${esc(r.price_asof || "")})`],
+  ];
+  const link = (href, text) => `<a href="${href}" target="_blank" rel="noopener">${text}</a>`;
+  return `<tr class="detail"><td colspan="${COLS.length}"><div class="detail">
+    <h3>${esc(r.ticker)} — ${esc(r.company)}</h3>
+    <div class="links">
+      ${link(`https://finance.yahoo.com/quote/${encodeURIComponent(r.ticker.replace(".", "-"))}`, "Yahoo Finance")}
+      ${link(`https://www.sec.gov/cgi-bin/own-disp?action=getissuer&CIK=${cik}`, "SEC insider transactions")}
+      ${link(`https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=${cik}&type=4`, "EDGAR Form 4 filings")}
+      <a href="#${encodeURIComponent(r.ticker)}">Link to this stock</a>
+    </div>
+    <div class="facts">${facts.map(([k, v]) => `<div><b>${k}</b>${v}</div>`).join("")}</div>
+    ${evs.length ? `<p>${evs.map((e) => `${esc(e.as_of)}: ${eventText(e)}`).join("<br>")}</p>` : ""}
+    <div class="wrap"><table><thead><tr><th>Trade</th><th>Filed</th><th>Insider</th><th>Role</th><th>Title</th>
+      <th class="num">Shares</th><th class="num">Price</th><th class="num">Value</th><th class="num">Owned after</th>
+      <th>D/I</th><th>Filing</th></tr></thead><tbody>
+    ${p.map((x) => `<tr><td>${esc(x.trans_date)}</td><td>${esc(x.filing_date)}</td><td>${esc(x.owner_name)}</td>
+      <td>${esc(x.owner_role)}</td><td>${esc(x.owner_title || "")}</td><td class="num">${int(x.shares)}</td>
+      <td class="num">${num(x.price)}</td><td class="num">${money(x.value)}</td><td class="num">${int(x.shares_after)}</td>
+      <td>${esc(x.direct_indirect || "")}</td>
+      <td>${link(`https://www.sec.gov/Archives/edgar/data/${r.issuer_cik}/${x.accession.replace(/-/g, "")}/${x.accession}-index.htm`, esc(x.form_type))}</td></tr>`).join("")}
+    </tbody></table></div></div></td></tr>`;
+}
+
+function renderChanges() {
+  const q = $("#cq").value.trim().toLowerCase();
+  const top = $("#toponly").checked;
+  const groups = new Map();
+  for (const e of EVENTS) {
+    if (!state.types.has(e.event) || (top && e.rank > D.top_n)) continue;
+    if (q && !(String(e.ticker).toLowerCase().includes(q) || String(e.company).toLowerCase().includes(q))) continue;
+    const k = e.as_of + "|" + e.cik;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(e);
+  }
+  const list = [...groups.values()].map((g) => {
+    g.sort((a, b) => ORDER[a.event] - ORDER[b.event]);
+    const hasFirst = g.some((e) => e.event === "first_time");
+    return g.filter((e) => !(hasFirst && e.event === "new_entry"));
+  }).sort((a, b) => b[0].as_of.localeCompare(a[0].as_of) || ORDER[a[0].event] - ORDER[b[0].event] || a[0].rank - b[0].rank);
+  const pages = Math.max(1, Math.ceil(list.length / CPAGE));
+  state.cpage = Math.min(Math.max(state.cpage, 0), pages - 1);
+  let last = null, html = "";
+  for (const g of list.slice(state.cpage * CPAGE, (state.cpage + 1) * CPAGE)) {
+    const e = g[0];
+    if (e.as_of !== last) { html += `<tr class="day"><td colspan="4">Filings through ${esc(e.as_of)}</td></tr>`; last = e.as_of; }
+    html += `<tr><td><a class="tick" href="#${encodeURIComponent(e.ticker)}">${esc(e.ticker)}</a></td>` +
+      `<td class="company">${esc(e.company)}</td><td class="num">${e.rank}</td><td>${g.map(eventText).join("<br>")}</td></tr>`;
+  }
+  $("#changes tbody").innerHTML = html || '<tr><td colspan="4" class="muted">No changes match.</td></tr>';
+  $("#ccount").textContent = `${list.length.toLocaleString()} changes`;
+  $("#cpager").innerHTML = pages > 1
+    ? `Page ${state.cpage + 1} of ${pages}<button id="cprev" ${state.cpage ? "" : "disabled"}>‹ Newer</button>` +
+      `<button id="cnext" ${state.cpage < pages - 1 ? "" : "disabled"}>Older ›</button>`
+    : "";
+}
+
+function showTab(name) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  $("#tab-ranking").hidden = name !== "ranking";
+  $("#tab-changes").hidden = name !== "changes";
+}
+
+function openFromHash() {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (!h) return;
+  if (h === "changes") { showTab("changes"); return; }
+  const r = RANK.find((x) => x.ticker.toUpperCase() === h.toUpperCase());
+  if (!r) return;
+  showTab("ranking");
+  $("#q").value = ""; $("#minins").value = "1"; $("#hidemis").checked = false;
+  state.sort = "rank"; state.asc = true; state.open = r.issuer_cik;
+  state.page = Math.floor(filteredRanking().findIndex((x) => x.issuer_cik === r.issuer_cik) / PAGE);
+  renderRanking();
+  const row = document.querySelector(`tr.row[data-cik="${r.issuer_cik}"]`);
+  if (row) row.scrollIntoView({block: "center"});
+}
+
+function bind() {
+  document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+    showTab(b.dataset.tab);
+    history.replaceState(null, "", b.dataset.tab === "changes" ? "#changes" : location.pathname);
+  }));
+  for (const id of ["#q", "#minins", "#hidemis"]) $(id).addEventListener("input", () => { state.page = 0; renderRanking(); });
+  $("#rank thead").addEventListener("click", (ev) => {
+    const k = ev.target.closest("th")?.dataset.k;
+    if (!k) return;
+    if (state.sort === k) state.asc = !state.asc;
+    else { state.sort = k; state.asc = ["rank", "ticker", "company", "roles"].includes(k); }
+    renderRanking();
+  });
+  $("#rank tbody").addEventListener("click", (ev) => {
+    if (ev.target.closest("a") || ev.target.closest("tr.detail")) return;
+    const tr = ev.target.closest("tr.row");
+    if (!tr) return;
+    const cik = +tr.dataset.cik;
+    state.open = state.open === cik ? null : cik;
+    renderRanking();
+  });
+  $("#pager").addEventListener("click", (ev) => {
+    if (ev.target.id === "prev") state.page--;
+    else if (ev.target.id === "next") state.page++;
+    else return;
+    renderRanking();
+    $("#rank").scrollIntoView();
+  });
+  $("#evchips").innerHTML = Object.entries(EV).map(([k, [icon, label]]) =>
+    `<label class="chip"><input type="checkbox" data-ev="${k}" checked> ${icon} ${label.replace(" N", " " + D.top_n)}</label>`).join(" ");
+  $("#evchips").addEventListener("change", (ev) => {
+    const k = ev.target.dataset.ev;
+    if (ev.target.checked) state.types.add(k); else state.types.delete(k);
+    state.cpage = 0; renderChanges();
+  });
+  for (const id of ["#cq", "#toponly"]) $(id).addEventListener("input", () => { state.cpage = 0; renderChanges(); });
+  $("#cpager").addEventListener("click", (ev) => {
+    if (ev.target.id === "cprev") state.cpage--;
+    else if (ev.target.id === "cnext") state.cpage++;
+    else return;
+    renderChanges();
+    $("#changes").scrollIntoView();
+  });
+  window.addEventListener("hashchange", openFromHash);
+}
+
+fetch("data.json", {cache: "no-cache"}).then((r) => r.json()).then((data) => {
+  D = data;
+  RANK = records(D.ranking.fields, D.ranking.rows);
+  EVENTS = records(D.events.fields, D.events.rows);
+  PURCH = Object.fromEntries(Object.entries(D.purchases.by_cik).map(([k, v]) => [k, records(D.purchases.fields, v)]));
+  const repo = `https://github.com/${D.repo}`;
+  $("#meta").innerHTML = [
+    `SEC filings through <b>${esc(D.as_of)}</b>`, `prices as of ${esc(D.price_asof || "-")}`,
+    `${D.window_days}-day window`, `${RANK.length.toLocaleString()} stocks with insider buying`,
+    `<a href="ranking.csv">CSV</a>`, `<a href="${repo}">GitHub</a>`,
+  ].map((s) => `<span>${s}</span>`).join("");
+  $("#toplabel").textContent = `Top ${D.top_n} only`;
+  $("#weights").textContent = `Score = 100 × weighted mean (cost ${D.weights.cost}, recurrence ${D.weights.recurrence}, ` +
+    `insiders ${D.weights.insiders}). Changes compare each filing day's ranking with the previous one; a big move is ` +
+    `${D.big_move}+ places within the top ${D.top_n}.`;
+  $("#foot").innerHTML = `Data: SEC EDGAR Form 4 filings and Yahoo Finance prices, updated automatically by GitHub Actions ` +
+    `(${esc(D.generated)}). Not investment advice. <a href="${repo}">Source</a>`;
+  bind();
+  renderRanking();
+  renderChanges();
+  openFromHash();
+}).catch((err) => { $("#meta").textContent = "Failed to load data: " + err; });
+</script>
+</body>
+</html>
